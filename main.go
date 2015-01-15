@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -129,7 +128,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("freegeoip v%s\n", VERSION)
+		log.Printf("freegeoip v%s\n", VERSION)
 		return
 	}
 
@@ -143,6 +142,7 @@ func main() {
 	server := &dns.Server{Addr: *addr, Net: "udp"}
 	dns.HandleFunc(*suffix+".", func(w dns.ResponseWriter, r *dns.Msg) {
 		q := r.Question[0]
+		log.Println(q.String())
 		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 			ip := queryIP(q, *suffix)
 
@@ -162,7 +162,7 @@ func main() {
 	})
 
 	if !*silent {
-		println("freegeoip dns server starting on", *addr)
+		log.Println("freegeoip dns server starting on", *addr)
 		go logEvents(db)
 	}
 	panic(server.ListenAndServe())
