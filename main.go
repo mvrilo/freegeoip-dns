@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	VERSION     = "0.1.0"
+	VERSION     = "0.0.1"
 	maxmindFile = "http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.mmdb.gz"
 )
 
