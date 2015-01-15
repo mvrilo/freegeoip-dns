@@ -46,20 +46,6 @@ type Query struct {
 	} `maxminddb:"postal"`
 }
 
-func localizedName(field map[string]string, accept []string) (name string) {
-	if accept != nil {
-		var f string
-		var ok bool
-		for _, l := range accept {
-			f, ok = field[l]
-			if ok {
-				return f
-			}
-		}
-	}
-	return field["en"]
-}
-
 func roundFloat(val float64, roundOn float64, places int) (newVal float64) {
 	var round float64
 	pow := math.Pow(10, float64(places))
@@ -73,7 +59,7 @@ func roundFloat(val float64, roundOn float64, places int) (newVal float64) {
 	return round / pow
 }
 
-func newResponse(query *Query, ip net.IP, lang []string) []string {
+func response(query *Query, ip net.IP, lang string) []string {
 	record := struct {
 		IP          string  `json:"ip"`
 		CountryCode string  `json:"country_code"`
@@ -89,8 +75,8 @@ func newResponse(query *Query, ip net.IP, lang []string) []string {
 	}{
 		IP:          ip.String(),
 		CountryCode: query.Country.ISOCode,
-		CountryName: localizedName(query.Country.Names, lang),
-		City:        localizedName(query.City.Names, lang),
+		CountryName: query.Country.Names[lang],
+		City:        query.City.Names[lang],
 		ZipCode:     query.Postal.Code,
 		TimeZone:    query.Location.TimeZone,
 		Latitude:    roundFloat(query.Location.Latitude, .5, 3),
@@ -99,7 +85,7 @@ func newResponse(query *Query, ip net.IP, lang []string) []string {
 	}
 	if len(query.Region) > 0 {
 		record.RegionCode = query.Region[0].ISOCode
-		record.RegionName = localizedName(query.Region[0].Names, lang)
+		record.RegionName = query.Region[0].Names[lang]
 	}
 
 	return []string{
@@ -130,10 +116,12 @@ func openDB(dsn string, updateIntvl, maxRetryIntvl time.Duration) (db *freegeoip
 
 func main() {
 	addr := flag.String("addr", ":5300", "Address in form of ip:port to listen on")
+	suffix := flag.String("suffix", "", "Domain suffix for the DNS queries")
 	ipdb := flag.String("db", maxmindFile, "IP database file or URL")
 	updateIntvl := flag.Duration("update", 24*time.Hour, "Database update check interval")
 	retryIntvl := flag.Duration("retry", time.Hour, "Max time to wait before retrying update")
 	silent := flag.Bool("silent", false, "Do not log requests to stderr")
+	lang := flag.String("lang", "en", "Language to return the fields, e.g. country name")
 	// redisAddr := flag.String("redis", "127.0.0.1:6379", "Redis address in form of ip:port for quota")
 	// quotaMax := flag.Int("quota-max", 0, "Max requests per source IP per interval; Set 0 to turn off")
 	// quotaIntvl := flag.Duration("quota-interval", time.Hour, "Quota expiration interval")
@@ -153,10 +141,10 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	server := &dns.Server{Addr: *addr, Net: "udp"}
-	dns.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
+	dns.HandleFunc(*suffix+".", func(w dns.ResponseWriter, r *dns.Msg) {
 		q := r.Question[0]
 		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
-			ip := queryIP(q)
+			ip := queryIP(q, *suffix)
 
 			m := new(dns.Msg)
 			m.SetReply(r)
@@ -166,7 +154,7 @@ func main() {
 
 			txt := new(dns.TXT)
 			txt.Hdr = dns.RR_Header{Name: q.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0}
-			txt.Txt = newResponse(&query, ip, []string{"en"})
+			txt.Txt = response(&query, ip, *lang)
 
 			m.Answer = append(m.Answer, txt)
 			w.WriteMsg(m)
@@ -180,8 +168,8 @@ func main() {
 	panic(server.ListenAndServe())
 }
 
-func queryIP(q dns.Question) net.IP {
-	h := strings.Split(q.Name, ".dns.freegeoip.net")[0]
+func queryIP(q dns.Question, suffix string) net.IP {
+	h := strings.Split(q.Name, "."+suffix)[0]
 	if ip := net.ParseIP(h); ip != nil {
 		return ip
 	}
