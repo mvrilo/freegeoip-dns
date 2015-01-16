@@ -181,7 +181,7 @@ func main() {
 		log.Println("freegeoip dns server starting on", *addr)
 		go logEvents(db)
 	}
-	panic(server.ListenAndServe())
+	log.Fatal(server.ListenAndServe())
 }
 
 func queryIP(q dns.Question, suffix string) net.IP {
