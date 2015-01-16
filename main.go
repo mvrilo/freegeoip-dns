@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -140,9 +141,11 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	server := &dns.Server{Addr: *addr, Net: "udp"}
+
 	dns.HandleFunc(*suffix+".", func(w dns.ResponseWriter, r *dns.Msg) {
 		q := r.Question[0]
-		log.Println(q.String())
+
+		info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
 		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 			ip := queryIP(q, *suffix)
 
@@ -158,6 +161,19 @@ func main() {
 
 			m.Answer = append(m.Answer, txt)
 			w.WriteMsg(m)
+
+			if !*silent {
+				log.Printf("%s (RESOLVED)\n", info)
+			}
+		} else {
+			m := new(dns.Msg)
+			m.SetReply(r)
+			m.Rcode = dns.RcodeNameError
+			w.WriteMsg(m)
+
+			if !*silent {
+				log.Printf("%s (NXDOMAIN)\n", info)
+			}
 		}
 	})
 
@@ -169,7 +185,10 @@ func main() {
 }
 
 func queryIP(q dns.Question, suffix string) net.IP {
-	h := strings.Split(q.Name, "."+suffix)[0]
+	h := q.Name
+	if suffix != "" {
+		h = strings.Split(q.Name, "."+suffix)[0]
+	}
 	if ip := net.ParseIP(h); ip != nil {
 		return ip
 	}
