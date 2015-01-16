@@ -59,48 +59,29 @@ func roundFloat(val float64, roundOn float64, places int) (newVal float64) {
 	return round / pow
 }
 
-func response(query *Query, ip net.IP, lang string) []string {
-	record := struct {
-		IP          string  `json:"ip"`
-		CountryCode string  `json:"country_code"`
-		CountryName string  `json:"country_name"`
-		RegionCode  string  `json:"region_code"`
-		RegionName  string  `json:"region_name"`
-		City        string  `json:"city"`
-		ZipCode     string  `json:"zip_code"`
-		TimeZone    string  `json:"time_zone"`
-		Latitude    float64 `json:"latitude"`
-		Longitude   float64 `json:"longitude"`
-		MetroCode   uint    `json:"metro_code"`
-	}{
-		IP:          ip.String(),
-		CountryCode: query.Country.ISOCode,
-		CountryName: query.Country.Names[lang],
-		City:        query.City.Names[lang],
-		ZipCode:     query.Postal.Code,
-		TimeZone:    query.Location.TimeZone,
-		Latitude:    roundFloat(query.Location.Latitude, .5, 3),
-		Longitude:   roundFloat(query.Location.Longitude, .5, 3),
-		MetroCode:   query.Location.MetroCode,
-	}
-	if len(query.Region) > 0 {
-		record.RegionCode = query.Region[0].ISOCode
-		record.RegionName = query.Region[0].Names[lang]
+func response(query *Query, ip net.IP, lang string) (ret []string) {
+	ret = []string{
+		ip.String(),
+		query.Country.ISOCode,
+		query.Country.Names[lang],
 	}
 
-	return []string{
-		ip.String(),
-		record.CountryCode,
-		record.CountryName,
-		record.RegionCode,
-		record.RegionName,
-		record.City,
-		record.ZipCode,
-		record.TimeZone,
-		strconv.FormatFloat(record.Latitude, 'f', 2, 64),
-		strconv.FormatFloat(record.Longitude, 'f', 2, 64),
-		strconv.Itoa(int(record.MetroCode)),
+	if len(query.Region) > 0 {
+		ret = append(ret, []string{
+			query.Region[0].ISOCode,
+			query.Region[0].Names[lang],
+		}...)
 	}
+
+	ret = append(ret, []string{
+		query.City.Names[lang],
+		query.Postal.Code,
+		query.Location.TimeZone,
+		strconv.FormatFloat(query.Location.Latitude, 'f', 2, 64),
+		strconv.FormatFloat(query.Location.Longitude, 'f', 2, 64),
+		strconv.Itoa(int(query.Location.MetroCode)),
+	}...)
+	return
 }
 
 // openDB opens and returns the IP database.
@@ -148,6 +129,10 @@ func main() {
 		info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
 		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 			ip := queryIP(q, *suffix)
+			if ip == nil {
+				nxdomain(w, r, *silent, info)
+				return
+			}
 
 			m := new(dns.Msg)
 			m.SetReply(r)
@@ -166,14 +151,7 @@ func main() {
 				log.Printf("%s (RESOLVED)\n", info)
 			}
 		} else {
-			m := new(dns.Msg)
-			m.SetReply(r)
-			m.Rcode = dns.RcodeNameError
-			w.WriteMsg(m)
-
-			if !*silent {
-				log.Printf("%s (NXDOMAIN)\n", info)
-			}
+			nxdomain(w, r, *silent, info)
 		}
 	})
 
@@ -182,6 +160,17 @@ func main() {
 		go logEvents(db)
 	}
 	log.Fatal(server.ListenAndServe())
+}
+
+func nxdomain(w dns.ResponseWriter, r *dns.Msg, silent bool, info string) {
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Rcode = dns.RcodeNameError
+	w.WriteMsg(m)
+
+	if !silent {
+		log.Printf("%s (NXDOMAIN)\n", info)
+	}
 }
 
 func queryIP(q dns.Question, suffix string) net.IP {
