@@ -59,8 +59,8 @@ func roundFloat(val float64, roundOn float64, places int) (newVal float64) {
 	return round / pow
 }
 
-func response(query *Query, ip net.IP, lang string) (ret []string) {
-	ret = []string{
+func response(query *Query, ip net.IP, lang string) string {
+	ret := []string{
 		ip.String(),
 		query.Country.ISOCode,
 		query.Country.Names[lang],
@@ -81,7 +81,8 @@ func response(query *Query, ip net.IP, lang string) (ret []string) {
 		strconv.FormatFloat(query.Location.Longitude, 'f', 2, 64),
 		strconv.Itoa(int(query.Location.MetroCode)),
 	}...)
-	return
+
+	return strings.Join(ret, "    ")
 }
 
 // openDB opens and returns the IP database.
@@ -127,6 +128,7 @@ func main() {
 		q := r.Question[0]
 
 		info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
+
 		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 			ip := queryIP(q, *suffix)
 			if ip == nil {
@@ -142,7 +144,7 @@ func main() {
 
 			txt := new(dns.TXT)
 			txt.Hdr = dns.RR_Header{Name: q.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0}
-			txt.Txt = response(&query, ip, *lang)
+			txt.Txt = []string{response(&query, ip, *lang)}
 
 			m.Answer = append(m.Answer, txt)
 			w.WriteMsg(m)
