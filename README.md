@@ -16,10 +16,10 @@ dig @127.0.0.1 -p5300 github.com txt +short
 
 # NOTES
 
-The server can query for IP addresses too, you'll need to pass a suffix argument to treat the IP as subdomain. Example follows:
+The server can query for IP addresses too, you'll need to pass a domain argument to treat the IP as subdomain. Example follows:
 
 ```
-# ./freegeoip-dns -suffix=freegeoip
+# ./freegeoip-dns -domain=freegeoip
 dig @127.0.0.1 -p5300 192.30.252.129.freegeoip txt +short
 "192.30.252.129    US    United States    CA    California    San Francisco    94107    America/Los_Angeles    37.77    -122.39    807"
 ```

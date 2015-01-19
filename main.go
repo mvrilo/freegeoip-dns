@@ -103,7 +103,7 @@ func openDB(dsn string, updateIntvl, maxRetryIntvl time.Duration) (db *freegeoip
 
 func main() {
 	addr := flag.String("addr", ":5300", "Address in form of ip:port to listen on")
-	suffix := flag.String("suffix", "", "Domain suffix for the DNS queries")
+	domain := flag.String("domain", "", "Domain for the DNS queries")
 	ipdb := flag.String("db", maxmindFile, "IP database file or URL")
 	updateIntvl := flag.Duration("update", 24*time.Hour, "Database update check interval")
 	retryIntvl := flag.Duration("retry", time.Hour, "Max time to wait before retrying update")
@@ -129,13 +129,13 @@ func main() {
 
 	server := &dns.Server{Addr: *addr, Net: "udp"}
 
-	dns.HandleFunc(*suffix+".", func(w dns.ResponseWriter, r *dns.Msg) {
+	dns.HandleFunc(*domain+".", func(w dns.ResponseWriter, r *dns.Msg) {
 		q := r.Question[0]
 
 		info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
 
 		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
-			ip := queryIP(q, *suffix)
+			ip := queryIP(q, *domain)
 			if ip == nil {
 				nxdomain(w, r, *silent, info)
 				return
@@ -180,10 +180,10 @@ func nxdomain(w dns.ResponseWriter, r *dns.Msg, silent bool, info string) {
 	}
 }
 
-func queryIP(q dns.Question, suffix string) net.IP {
+func queryIP(q dns.Question, domain string) net.IP {
 	h := q.Name
-	if suffix != "" {
-		h = strings.Split(q.Name, "."+suffix)[0]
+	if domain != "" {
+		h = strings.Split(q.Name, "."+domain)[0]
 	}
 	if ip := net.ParseIP(h); ip != nil {
 		return ip
