@@ -101,6 +101,57 @@ func openDB(dsn string, updateIntvl, maxRetryIntvl time.Duration) (db *freegeoip
 	return
 }
 
+type handle struct {
+	db     *freegeoip.DB
+	silent bool
+	lang   string
+	domain string
+}
+
+func (h *handle) nxdomain(w dns.ResponseWriter, r *dns.Msg, info string) {
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Rcode = dns.RcodeNameError
+	w.WriteMsg(m)
+
+	if !h.silent {
+		log.Printf("%s (NXDOMAIN)\n", info)
+	}
+}
+
+func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	q := r.Question[0]
+
+	info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
+
+	if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
+		ip := queryIP(q, h.domain)
+		if ip == nil {
+			h.nxdomain(w, r, info)
+			return
+		}
+
+		m := new(dns.Msg)
+		m.SetReply(r)
+
+		var query Query
+		h.db.Lookup(ip, &query)
+
+		txt := new(dns.TXT)
+		txt.Hdr = dns.RR_Header{Name: q.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0}
+		txt.Txt = []string{response(&query, ip, h.lang)}
+
+		m.Answer = append(m.Answer, txt)
+		w.WriteMsg(m)
+
+		if !h.silent {
+			log.Printf("%s (RESOLVED)\n", info)
+		}
+	} else {
+		h.nxdomain(w, r, info)
+	}
+}
+
 func main() {
 	addr := flag.String("addr", ":5300", "Address in form of ip:port to listen on")
 	domain := flag.String("domain", "", "Domain for the DNS queries")
@@ -128,56 +179,13 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	server := &dns.Server{Addr: *addr, Net: "udp"}
-
-	dns.HandleFunc(*domain+".", func(w dns.ResponseWriter, r *dns.Msg) {
-		q := r.Question[0]
-
-		info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
-
-		if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
-			ip := queryIP(q, *domain)
-			if ip == nil {
-				nxdomain(w, r, *silent, info)
-				return
-			}
-
-			m := new(dns.Msg)
-			m.SetReply(r)
-
-			var query Query
-			db.Lookup(ip, &query)
-
-			txt := new(dns.TXT)
-			txt.Hdr = dns.RR_Header{Name: q.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0}
-			txt.Txt = []string{response(&query, ip, *lang)}
-
-			m.Answer = append(m.Answer, txt)
-			w.WriteMsg(m)
-
-			if !*silent {
-				log.Printf("%s (RESOLVED)\n", info)
-			}
-		} else {
-			nxdomain(w, r, *silent, info)
-		}
-	})
+	dns.Handle(*domain+".", &handle{db, *silent, *domain, *lang})
 
 	if !*silent {
 		log.Println("freegeoip dns server starting on", *addr)
 		go logEvents(db)
 	}
 	log.Fatal(server.ListenAndServe())
-}
-
-func nxdomain(w dns.ResponseWriter, r *dns.Msg, silent bool, info string) {
-	m := new(dns.Msg)
-	m.SetReply(r)
-	m.Rcode = dns.RcodeNameError
-	w.WriteMsg(m)
-
-	if !silent {
-		log.Printf("%s (NXDOMAIN)\n", info)
-	}
 }
 
 func queryIP(q dns.Question, domain string) net.IP {
