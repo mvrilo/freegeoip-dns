@@ -108,26 +108,36 @@ type handle struct {
 	domain string
 }
 
-func (h *handle) nxdomain(w dns.ResponseWriter, r *dns.Msg, info string) {
+func (h *handle) log(resolved bool, w dns.ResponseWriter, r *dns.Msg) {
+	if h.silent {
+		return
+	}
+
+	q := r.Question[0]
+	info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
+
+	if resolved {
+		log.Printf("%s (RESOLVED)\n", info)
+		return
+	}
+
+	log.Printf("%s (NXDOMAIN)\n", info)
+}
+
+func (h *handle) nxdomain(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Rcode = dns.RcodeNameError
 	w.WriteMsg(m)
-
-	if !h.silent {
-		log.Printf("%s (NXDOMAIN)\n", info)
-	}
+	h.log(false, w, r)
 }
 
 func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	q := r.Question[0]
-
-	info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
-
 	if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 		ip := queryIP(q, h.domain)
 		if ip == nil {
-			h.nxdomain(w, r, info)
+			h.nxdomain(w, r)
 			return
 		}
 
@@ -143,12 +153,9 @@ func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 		m.Answer = append(m.Answer, txt)
 		w.WriteMsg(m)
-
-		if !h.silent {
-			log.Printf("%s (RESOLVED)\n", info)
-		}
+		h.log(true, w, r)
 	} else {
-		h.nxdomain(w, r, info)
+		h.nxdomain(w, r)
 	}
 }
 
@@ -160,9 +167,6 @@ func main() {
 	retryIntvl := flag.Duration("retry", time.Hour, "Max time to wait before retrying update")
 	silent := flag.Bool("silent", false, "Do not log requests to stderr")
 	lang := flag.String("lang", "en", "Language to return the fields, e.g. country name")
-	// redisAddr := flag.String("redis", "127.0.0.1:6379", "Redis address in form of ip:port for quota")
-	// quotaMax := flag.Int("quota-max", 0, "Max requests per source IP per interval; Set 0 to turn off")
-	// quotaIntvl := flag.Duration("quota-interval", time.Hour, "Quota expiration interval")
 	version := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 
@@ -179,7 +183,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	server := &dns.Server{Addr: *addr, Net: "udp"}
-	dns.Handle(*domain+".", &handle{db, *silent, *domain, *lang})
+	dns.Handle(*domain+".", &handle{db, *silent, *lang, *domain})
 
 	if !*silent {
 		log.Println("freegeoip dns server starting on", *addr)
