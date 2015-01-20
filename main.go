@@ -108,7 +108,7 @@ type handle struct {
 	domain string
 }
 
-func (h *handle) log(resolved bool, w dns.ResponseWriter, r *dns.Msg) {
+func (h *handle) log(resolved bool, start time.Time, w dns.ResponseWriter, r *dns.Msg) {
 	if h.silent {
 		return
 	}
@@ -116,28 +116,30 @@ func (h *handle) log(resolved bool, w dns.ResponseWriter, r *dns.Msg) {
 	q := r.Question[0]
 	info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
 
+	durr := time.Now().Sub(start)
 	if resolved {
-		log.Printf("%s (RESOLVED)\n", info)
+		log.Printf("%s (RESOLVED) %s\n", info, durr)
 		return
 	}
 
-	log.Printf("%s (NXDOMAIN)\n", info)
+	log.Printf("%s (NXDOMAIN) %s\n", info, durr)
 }
 
-func (h *handle) nxdomain(w dns.ResponseWriter, r *dns.Msg) {
+func (h *handle) nxdomain(start time.Time, w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Rcode = dns.RcodeNameError
 	w.WriteMsg(m)
-	h.log(false, w, r)
+	h.log(false, start, w, r)
 }
 
 func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	start := time.Now()
 	q := r.Question[0]
 	if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 		ip := queryIP(q, h.domain)
 		if ip == nil {
-			h.nxdomain(w, r)
+			h.nxdomain(start, w, r)
 			return
 		}
 
@@ -153,9 +155,9 @@ func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 		m.Answer = append(m.Answer, txt)
 		w.WriteMsg(m)
-		h.log(true, w, r)
+		h.log(true, start, w, r)
 	} else {
-		h.nxdomain(w, r)
+		h.nxdomain(start, w, r)
 	}
 }
 
