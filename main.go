@@ -108,7 +108,7 @@ type handle struct {
 	domain string
 }
 
-func (h *handle) log(resolved bool, start time.Time, w dns.ResponseWriter, r *dns.Msg) {
+func (h *handle) log(err int, start time.Time, w dns.ResponseWriter, r *dns.Msg) {
 	if h.silent {
 		return
 	}
@@ -116,21 +116,25 @@ func (h *handle) log(resolved bool, start time.Time, w dns.ResponseWriter, r *dn
 	q := r.Question[0]
 	info := fmt.Sprintf("Question: Type=%s Class=%s Name=%s", dns.TypeToString[q.Qtype], dns.ClassToString[q.Qclass], q.Name)
 
-	durr := time.Now().Sub(start)
-	if resolved {
-		log.Printf("%s (RESOLVED) %s\n", info, durr)
-		return
+	var code string
+	switch err {
+	case dns.RcodeServerFailure:
+		code = "SERVFAIL"
+	case dns.RcodeNameError:
+		code = "NXDOMAIN"
+	default:
+		code = "RESOLVED"
 	}
 
-	log.Printf("%s (NXDOMAIN) %s\n", info, durr)
+	log.Printf("%s (%s) %s\n", info, code, time.Now().Sub(start))
 }
 
-func (h *handle) nxdomain(start time.Time, w dns.ResponseWriter, r *dns.Msg) {
+func (h *handle) fail(err int, start time.Time, w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
-	m.Rcode = dns.RcodeNameError
+	m.Rcode = err
 	w.WriteMsg(m)
-	h.log(false, start, w, r)
+	h.log(err, start, w, r)
 }
 
 func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
@@ -139,15 +143,18 @@ func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if q.Qtype == dns.TypeTXT && q.Qclass == dns.ClassINET {
 		ip := queryIP(q, h.domain)
 		if ip == nil {
-			h.nxdomain(start, w, r)
+			h.fail(dns.RcodeNameError, start, w, r)
+			return
+		}
+
+		var query Query
+		if err := h.db.Lookup(ip, &query); err != nil {
+			h.fail(dns.RcodeServerFailure, start, w, r)
 			return
 		}
 
 		m := new(dns.Msg)
 		m.SetReply(r)
-
-		var query Query
-		h.db.Lookup(ip, &query)
 
 		txt := new(dns.TXT)
 		txt.Hdr = dns.RR_Header{Name: q.Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 0}
@@ -155,10 +162,10 @@ func (h *handle) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 		m.Answer = append(m.Answer, txt)
 		w.WriteMsg(m)
-		h.log(true, start, w, r)
-	} else {
-		h.nxdomain(start, w, r)
+		h.log(m.Rcode, start, w, r)
+		return
 	}
+	h.fail(dns.RcodeNameError, start, w, r)
 }
 
 func main() {
